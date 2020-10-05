@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+iptables -t nat -X GATEWAY2SOCKS
+#建立新表
+iptables -t nat -N GATEWAY2SOCKS
+
+#内网IP直接返回,不做转发
+iptables -t nat -A GATEWAY2SOCKS -d 0.0.0.0/8 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 10.0.0.0/8 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 100.64.0.0/10 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 127.0.0.0/8 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 169.254.0.0/16 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 172.16.0.0/12 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 192.168.0.0/16 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 198.18.0.0/15 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 224.0.0.0/4 -j RETURN
+iptables -t nat -A GATEWAY2SOCKS -d 240.0.0.0/4 -j RETURN
+
+#TCP数据全部转发到8082端口
+iptables -t nat -A GATEWAY2SOCKS -p tcp -j REDIRECT --to-port 8082
+
+#最后是应用上面的规则,将OUTPUT出去的tcp流量全部经过SOCKS链
+iptables -t nat -A PREROUTING -p tcp -j GATEWAY2SOCKS
