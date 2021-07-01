@@ -77,7 +77,7 @@ func handle(conn net.Conn) {
 		// dial remote address
 		c, err = dialer.Dial("tcp", remote)
 		if err != nil {
-			if i == 30 {
+			if i == 10 {
 				log.Errorf("dialRemoteFail;retryTimes:%d;err:%s", i, err.Error())
 				// dial remote max retry
 				return
@@ -88,7 +88,16 @@ func handle(conn net.Conn) {
 	}
 
 	// log.Infof("begin;localIp:%s;handle;proxy:%s;remote:%s", src, proxy.ProxyIp, remote)
-	ExitChan := make(chan bool, 1)
+	ExitChan := make(chan bool, 10)
+	go func() {
+		for {
+			if time.Now().Unix()+5 >= proxy.EndTimestamp {
+				ExitChan <- true
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}()
 	go func() {
 		_, _ = io.Copy(c, conn)
 		ExitChan <- true
@@ -245,7 +254,7 @@ func testProxy(p ProxyIp) bool {
 func checkProxy() {
 	for {
 		updateProxy()
-		time.Sleep(5 * time.Second)
+		time.Sleep(3 * time.Second)
 	}
 }
 
@@ -256,6 +265,7 @@ func updateProxy() {
 		return
 	}
 	bB, err := ioutil.ReadAll(kk.Body)
+	defer kk.Body.Close()
 	if err != nil {
 		log.Printf("e2:", err.Error())
 		return
