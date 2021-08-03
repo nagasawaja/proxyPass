@@ -65,10 +65,10 @@ func handle(conn net.Conn) {
 	var dialer socks5.Dialer
 
 	var c net.Conn
-	for i := 1; i <= 30; i++ {
+	for i := 1; i <= 10; i++ {
 		// build a dialer via proxyIp
 		proxy = getProxy("", "")
-		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, nil)
+		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, &net.Dialer{Timeout: 1 * time.Second})
 		if err != nil {
 			log.Errorf("buildDialerFail;err:%s", err.Error())
 			return
@@ -88,16 +88,7 @@ func handle(conn net.Conn) {
 	}
 
 	// log.Infof("begin;localIp:%s;handle;proxy:%s;remote:%s", src, proxy.ProxyIp, remote)
-	ExitChan := make(chan bool, 10)
-	go func() {
-		for {
-			if time.Now().Unix()+5 >= proxy.EndTimestamp {
-				ExitChan <- true
-				break
-			}
-			time.Sleep(1 * time.Second)
-		}
-	}()
+	ExitChan := make(chan bool, 1)
 	go func() {
 		_, _ = io.Copy(c, conn)
 		ExitChan <- true
@@ -117,7 +108,6 @@ func handle(conn net.Conn) {
 }
 
 func getOriginalDst(client net.Conn) (string, error) {
-	//return "", nil
 	clientTcp, ok := client.(*net.TCPConn)
 	if !ok {
 		return "", errors.New("assertNetTcpConnFail")
@@ -129,6 +119,7 @@ func getOriginalDst(client net.Conn) (string, error) {
 
 	defer clientFile.Close()
 	fd := clientFile.Fd()
+
 	addr, err := syscall.GetsockoptIPv6Mreq(int(fd), syscall.IPPROTO_IP, 80)
 	if err != nil {
 		return "", err
