@@ -65,10 +65,12 @@ func handle(conn net.Conn) {
 	var dialer socks5.Dialer
 
 	var c net.Conn
-	for i := 1; i <= 30; i++ {
+	i := 0
+	for {
+		i++
 		// build a dialer via proxyIp
 		proxy = getProxy("", "")
-		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, &net.Dialer{Timeout: 3 * time.Second})
+		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, &net.Dialer{Timeout: 2 * time.Second})
 		if err != nil {
 			log.Errorf("buildDialerFail;err:%s", err.Error())
 			return
@@ -77,7 +79,7 @@ func handle(conn net.Conn) {
 		// dial remote address
 		c, err = dialer.Dial("tcp", remote)
 		if err != nil {
-			if i == 30 {
+			if i == 10 {
 				log.Errorf("dialRemoteFail;retryTimes:%d;err:%s", i, err.Error())
 				// dial remote max retry
 				return
@@ -174,28 +176,18 @@ type Ac struct {
 var proxyMap = map[string]Ac{}
 
 func getProxy(src string, forceGet string) (ret ProxyIp) {
-	return ProxyIp{
-		Ip:           "tunnel.qg.net",
-		Port:         22749,
-		Auth:         "C9B05C89",
-		Password:     "26BA01B5CB28",
-		ProxyIp:      "tunnel.qg.net",
-		EndTimestamp: 99999999,
+	PhoneIpMapProxyIpLock.Lock()
+	defer PhoneIpMapProxyIpLock.Unlock()
+	for _, v := range proxyMap {
+		ret.Ip = v.ProxyIP
+		ret.Port = v.ProxyPort
+		ret.ProxyIp = v.ProxyAddr
+		ret.Auth = v.ProxyID
+		ret.Password = v.ProxySecret
+		ret.EndTimestamp = 99999999
+		break
 	}
-	/*
-		PhoneIpMapProxyIpLock.Lock()
-		defer PhoneIpMapProxyIpLock.Unlock()
-		for _, v := range proxyMap {
-			ret.Ip = v.ProxyIP
-			ret.Port = v.ProxyPort
-			ret.ProxyIp = v.ProxyAddr
-			ret.Auth = v.ProxyID
-			ret.Password = v.ProxySecret
-			ret.EndTimestamp = 99999999
-		}
-		return ret
-
-	*/
+	return ret
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
@@ -253,9 +245,14 @@ func testProxy(p ProxyIp) bool {
 	}
 }
 
+var updateProxyErrorTimes = 0
+
 func checkProxy() {
 	for {
 		updateProxy()
+		if updateProxyErrorTimes >= 20 {
+			log.Panic("get remote over max times")
+		}
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -263,12 +260,14 @@ func checkProxy() {
 func updateProxy() {
 	kk, err := http.Get(getProxyUrl)
 	if err != nil {
+		updateProxyErrorTimes++
 		log.Printf("e1:", err.Error())
 		return
 	}
 	bB, err := ioutil.ReadAll(kk.Body)
 	defer kk.Body.Close()
 	if err != nil {
+		updateProxyErrorTimes++
 		log.Printf("e2:", err.Error())
 		return
 	}
@@ -277,6 +276,7 @@ func updateProxy() {
 	proxyMap = nil
 	err = json.Unmarshal(bB, &proxyMap)
 	if err != nil {
+		updateProxyErrorTimes++
 		log.Printf("e3:", err.Error())
 		return
 	}
