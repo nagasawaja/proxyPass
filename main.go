@@ -47,12 +47,7 @@ func main() {
 var counter int64 = 0
 
 func handle(conn net.Conn) {
-	defer func() {
-		err := conn.Close()
-		if err != nil {
-			log.Errorf("connCloseFail;err:%s", err.Error())
-		}
-	}()
+	defer conn.Close()
 
 	// getOriginalDst
 	remote, err := getOriginalDst(conn)
@@ -70,7 +65,7 @@ func handle(conn net.Conn) {
 		i++
 		// build a dialer via proxyIp
 		proxy = getProxy("", "")
-		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, &net.Dialer{Timeout: 2 * time.Second})
+		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, &net.Dialer{Timeout: 10 * time.Second})
 		if err != nil {
 			log.Errorf("buildDialerFail;err:%s", err.Error())
 			return
@@ -79,7 +74,8 @@ func handle(conn net.Conn) {
 		// dial remote address
 		c, err = dialer.Dial("tcp", remote)
 		if err != nil {
-			if i == 10 {
+			if i == 1 {
+				dialer = nil
 				log.Errorf("dialRemoteFail;retryTimes:%d;err:%s", i, err.Error())
 				// dial remote max retry
 				return
@@ -258,7 +254,9 @@ func checkProxy() {
 }
 
 func updateProxy() {
-	kk, err := http.Get(getProxyUrl)
+	client := http.Client{Timeout: time.Second * 3}
+	defer client.CloseIdleConnections()
+	kk, err := client.Get(getProxyUrl)
 	if err != nil {
 		updateProxyErrorTimes++
 		log.Printf("e1:", err.Error())
