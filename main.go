@@ -47,6 +47,8 @@ func main() {
 var counter int64 = 0
 
 func handle(conn net.Conn) {
+	ExitChan := make(chan bool, 2)
+	defer close(ExitChan)
 	defer conn.Close()
 
 	// getOriginalDst
@@ -65,7 +67,7 @@ func handle(conn net.Conn) {
 		i++
 		// build a dialer via proxyIp
 		proxy = getProxy("", "")
-		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, &net.Dialer{Timeout: 10 * time.Second})
+		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, &net.Dialer{Timeout: 3 * time.Second})
 		if err != nil {
 			log.Errorf("buildDialerFail;err:%s", err.Error())
 			return
@@ -74,9 +76,10 @@ func handle(conn net.Conn) {
 		// dial remote address
 		c, err = dialer.Dial("tcp", remote)
 		if err != nil {
-			if i == 1 {
-				dialer = nil
-				log.Errorf("dialRemoteFail;retryTimes:%d;err:%s", i, err.Error())
+			dialer = nil
+			c = nil
+			if i == 10 {
+				log.Errorf("dialRemoteFail; src:%s; remote:%s; proxy:%s; err:%s", src, remote, proxy.ProxyIp, err.Error())
 				// dial remote max retry
 				return
 			}
@@ -84,9 +87,9 @@ func handle(conn net.Conn) {
 		}
 		break
 	}
-
+	defer c.Close()
 	// log.Infof("begin;localIp:%s;handle;proxy:%s;remote:%s", src, proxy.ProxyIp, remote)
-	ExitChan := make(chan bool, 1)
+
 	go func() {
 		_, _ = io.Copy(c, conn)
 		ExitChan <- true
@@ -96,11 +99,7 @@ func handle(conn net.Conn) {
 		ExitChan <- true
 	}()
 	<-ExitChan
-	err = c.Close()
-	if err != nil {
-		log.Errorf("cCloseFail;localIp:%s;err:%s", src, err.Error())
-		return
-	}
+
 	// log.Infof("end;localIp:%s;handle;proxy:%s;remote:%s", src, proxy.ProxyIp, remote)
 	return
 }
@@ -254,7 +253,7 @@ func checkProxy() {
 }
 
 func updateProxy() {
-	client := http.Client{Timeout: time.Second * 3}
+	client := http.Client{Timeout: time.Second * 5}
 	defer client.CloseIdleConnections()
 	kk, err := client.Get(getProxyUrl)
 	if err != nil {
