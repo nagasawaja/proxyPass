@@ -47,8 +47,8 @@ func main() {
 var counter int64 = 0
 
 func handle(conn net.Conn) {
-	ExitChan := make(chan bool, 2)
-	defer close(ExitChan)
+	ExitChan := make(chan bool, 1)
+	//defer close(ExitChan)
 	defer conn.Close()
 
 	// getOriginalDst
@@ -79,7 +79,7 @@ func handle(conn net.Conn) {
 			dialer = nil
 			c = nil
 			if i == 10 {
-				log.Errorf("dialRemoteFail; src:%s; remote:%s; proxy:%s; err:%s", src, remote, proxy.ProxyIp, err.Error())
+				// log.Errorf("dialRemoteFail; src:%s; remote:%s; proxy:%s; err:%s", src, remote, proxy.ProxyIp, err.Error())
 				// dial remote max retry
 				return
 			}
@@ -89,14 +89,16 @@ func handle(conn net.Conn) {
 	}
 	defer c.Close()
 	// log.Infof("begin;localIp:%s;handle;proxy:%s;remote:%s", src, proxy.ProxyIp, remote)
-
+	randd := fmt.Sprintf("%d:%s", time.Now().Nanosecond(), src)
 	go func() {
 		_, _ = io.Copy(c, conn)
 		ExitChan <- true
+		log.Printf("c:%s", randd)
 	}()
 	go func() {
 		_, _ = io.Copy(conn, c)
 		ExitChan <- true
+		log.Printf("conn:%s", randd)
 	}()
 	<-ExitChan
 
@@ -219,27 +221,6 @@ func httpListen() {
 
 }
 
-func testProxy(p ProxyIp) bool {
-	// create a socks5 dialer
-	dialer, err := socks5.SOCKS5("tcp", p.ProxyIp, &socks5.Auth{User: p.Auth, Password: p.Password}, socks5.Direct)
-	if err != nil {
-		log.Errorf("ProxyConnectFail;p:%+v;err:%s", p, err.Error())
-		return false
-	}
-	// setup a http client
-	httpTransport := &http.Transport{}
-	httpClient := &http.Client{Transport: httpTransport}
-	// set our socks5 as the dialer
-	httpTransport.Dial = dialer.Dial
-	if resp, err := httpClient.Get("https://ecs.aliyuncs.com"); err != nil {
-		log.Errorf("ProxyGetFail;p:%+v;err:%s", p, err.Error())
-		return false
-	} else {
-		_ = resp.Body.Close()
-		return true
-	}
-}
-
 var updateProxyErrorTimes = 0
 
 func checkProxy() {
@@ -254,18 +235,17 @@ func checkProxy() {
 
 func updateProxy() {
 	client := http.Client{Timeout: time.Second * 5}
-	defer client.CloseIdleConnections()
 	kk, err := client.Get(getProxyUrl)
 	if err != nil {
 		updateProxyErrorTimes++
-		log.Printf("e1:", err.Error())
+		log.Printf("e1:%s", err.Error())
 		return
 	}
 	bB, err := ioutil.ReadAll(kk.Body)
 	defer kk.Body.Close()
 	if err != nil {
 		updateProxyErrorTimes++
-		log.Printf("e2:", err.Error())
+		log.Printf("e2:%s", err.Error())
 		return
 	}
 	PhoneIpMapProxyIpLock.Lock()
@@ -274,7 +254,7 @@ func updateProxy() {
 	err = json.Unmarshal(bB, &proxyMap)
 	if err != nil {
 		updateProxyErrorTimes++
-		log.Printf("e3:", err.Error())
+		log.Printf("e3:%s", err.Error())
 		return
 	}
 	log.Printf("updateProxySuc")
