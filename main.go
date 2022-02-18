@@ -30,6 +30,7 @@ var ipMap = sync.Map{}
 func main() {
 	//go httpListen()
 	go checkProxy()
+	time.Sleep(2 * time.Second)
 	if l, err := net.Listen("tcp", ":8082"); err == nil {
 		log.Infof("begin")
 		for {
@@ -66,7 +67,7 @@ func handle(conn net.Conn) {
 	for {
 		i++
 		// build a dialer via proxyIp
-		proxy = getProxy("", "")
+		proxy = getProxy()
 		dialer, err = socks5.SOCKS5("tcp", proxy.ProxyIp, &socks5.Auth{User: proxy.Auth, Password: proxy.Password}, &net.Dialer{Timeout: 3 * time.Second})
 		if err != nil {
 			log.Errorf("buildDialerFail;err:%s", err.Error())
@@ -78,8 +79,10 @@ func handle(conn net.Conn) {
 		if err != nil {
 			dialer = nil
 			c = nil
-			if i == 10 {
-				// log.Errorf("dialRemoteFail; src:%s; remote:%s; proxy:%s; err:%s", src, remote, proxy.ProxyIp, err.Error())
+			//log.Errorf("dialRemoteFail; src:%s; remote:%s; proxy:%s; err:%s", src, remote, proxy.ProxyIp, err.Error())
+			if i == 3 {
+				updateProxyErrorTimes++
+				log.Errorf("dialRemoteFail final; src:%s; remote:%s; proxy:%s; err:%s", src, remote, proxy.ProxyIp, err.Error())
 				// dial remote max retry
 				return
 			}
@@ -89,16 +92,13 @@ func handle(conn net.Conn) {
 	}
 	defer c.Close()
 	// log.Infof("begin;localIp:%s;handle;proxy:%s;remote:%s", src, proxy.ProxyIp, remote)
-	randd := fmt.Sprintf("%d:%s", time.Now().Nanosecond(), src)
 	go func() {
 		_, _ = io.Copy(c, conn)
 		ExitChan <- true
-		log.Printf("c:%s", randd)
 	}()
 	go func() {
 		_, _ = io.Copy(conn, c)
 		ExitChan <- true
-		log.Printf("conn:%s", randd)
 	}()
 	<-ExitChan
 
@@ -107,6 +107,7 @@ func handle(conn net.Conn) {
 }
 
 func getOriginalDst(client net.Conn) (string, error) {
+	//return "", nil
 	clientTcp, ok := client.(*net.TCPConn)
 	if !ok {
 		return "", errors.New("assertNetTcpConnFail")
@@ -156,9 +157,6 @@ type GetProxyResponseBody struct {
 	Msg string `json:"msg"`
 }
 
-var PhoneIpMapProxyIp = map[string]ProxyIp{}
-var PhoneIpMapProxyIpLock = &sync.Mutex{}
-
 type Ac struct {
 	ProxyIP      string `json:"proxyIp"`
 	ProxyPort    int64  `json:"proxyPort"`
@@ -170,20 +168,20 @@ type Ac struct {
 	Aaaaa        string `json:"aaaaa"`
 }
 
+var proxyChan = make(chan ProxyIp, 50)
 var proxyMap = map[string]Ac{}
+var proxyChanLock = &sync.Mutex{}
 
-func getProxy(src string, forceGet string) (ret ProxyIp) {
-	PhoneIpMapProxyIpLock.Lock()
-	defer PhoneIpMapProxyIpLock.Unlock()
-	for _, v := range proxyMap {
-		ret.Ip = v.ProxyIP
-		ret.Port = v.ProxyPort
-		ret.ProxyIp = v.ProxyAddr
-		ret.Auth = v.ProxyID
-		ret.Password = v.ProxySecret
-		ret.EndTimestamp = 99999999
-		break
+func getProxy() (ret ProxyIp) {
+	proxyChanLock.Lock()
+	defer proxyChanLock.Unlock()
+	select {
+	case ret = <-proxyChan:
+		proxyChan <- ret
+		return ret
+	default:
 	}
+
 	return ret
 }
 
@@ -226,10 +224,10 @@ var updateProxyErrorTimes = 0
 func checkProxy() {
 	for {
 		updateProxy()
-		if updateProxyErrorTimes >= 20 {
+		if updateProxyErrorTimes >= 35 {
 			log.Panic("get remote over max times")
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(7 * time.Second)
 	}
 }
 
@@ -248,8 +246,12 @@ func updateProxy() {
 		log.Printf("e2:%s", err.Error())
 		return
 	}
-	PhoneIpMapProxyIpLock.Lock()
-	defer PhoneIpMapProxyIpLock.Unlock()
+	proxyChanLock.Lock()
+	defer proxyChanLock.Unlock()
+	// clear chan
+	for len(proxyChan) > 0 {
+		<-proxyChan
+	}
 	proxyMap = nil
 	err = json.Unmarshal(bB, &proxyMap)
 	if err != nil {
@@ -257,5 +259,17 @@ func updateProxy() {
 		log.Printf("e3:%s", err.Error())
 		return
 	}
+
+	for _, v := range proxyMap {
+		ret := ProxyIp{}
+		ret.Ip = v.ProxyIP
+		ret.Port = v.ProxyPort
+		ret.ProxyIp = v.ProxyAddr
+		ret.Auth = v.ProxyID
+		ret.Password = v.ProxySecret
+		ret.EndTimestamp = 99999999
+		proxyChan <- ret
+	}
+
 	log.Printf("updateProxySuc")
 }
